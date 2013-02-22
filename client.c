@@ -7,34 +7,62 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <netdb.h>
 
 #define BUFFER_SIZE 256
 
-void input_echo(int sockfd, struct sockaddr_in serv_addr)
+int udp_connect(const char *host, const char *serv)
+{
+    struct addrinfo hints, *res, *saved;
+    int n, sockfd;
+
+    bzero(&hints, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    n = getaddrinfo(host, serv, &hints, &res);
+    if(n != 0)
+    {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(n));
+        return -1;
+    }
+    saved = res;
+    while(res)
+    {
+        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if(sockfd >= 0)
+        {
+            if(connect(sockfd, res->ai_addr, res->ai_addrlen) == 0)
+                break;
+        }
+        res = res->ai_next;
+    }
+    freeaddrinfo(saved);
+    if(res == NULL)
+    {
+        perror("udp_connect");
+        return -1;
+    }
+    else return sockfd;
+}
+
+void input_echo(int sockfd)
 {
     ssize_t count;
     char buf[BUFFER_SIZE + 1]; /* "+1" for null byte */
-    socklen_t len;
 
-    len = sizeof(serv_addr);
-    if(connect(sockfd, (struct sockaddr *)&serv_addr, len) == -1)
-    {
-        perror("connect");
-        exit(1);
-    }
     while(fgets(buf, BUFFER_SIZE, stdin) != NULL)
     {
-        count = sendto(sockfd, buf, strlen(buf), 0,
-                (struct sockaddr *)&serv_addr, len);
+        count = write(sockfd, buf, strlen(buf));
         if(count < 0)
         {
-            perror("sendto");
+            perror("write");
             exit(1);
         }
-        count = recvfrom(sockfd, buf, BUFFER_SIZE, 0, NULL, NULL);
+        count = read(sockfd, buf, BUFFER_SIZE);
         if(count < 0)
         {
-            perror("recvfrom");
+            perror("read");
             exit(1);
         }
         else if(count == 0)
@@ -50,38 +78,26 @@ void input_echo(int sockfd, struct sockaddr_in serv_addr)
 int main(int argc, char *argv[])
 {
     int sockfd;
-    struct sockaddr_in addr; /* server address */
-    char *ip;
-    int port;
+    char *host, *serv;
 
-    ip = "127.0.0.1";
-    port = 8080;
+    host = "127.0.0.1";
+    serv = "webcache";
     switch(argc)
     {
         case 3:
-            port = atoi(argv[2]);
+            serv = argv[2];
         case 2:
-            ip = argv[1];
+            host = argv[1];
         case 1:
             break;
         default:
-            fprintf(stderr, "usage: %s <server_ip> <port>\n", argv[0]);
+            fprintf(stderr, "usage: %s <host> <service>\n", argv[0]);
             return 1;
     }
 
-    if((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-    {
-        perror("socket");
+    sockfd = udp_connect(host, serv);
+    if(sockfd < 0)
         exit(1);
-    }
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    if(inet_pton(AF_INET, ip, &addr.sin_addr) <= 0)
-    {
-        fprintf(stderr, "ip address is not valid\n");
-        exit(1);
-    }
-    input_echo(sockfd, addr);
+    input_echo(sockfd);
     exit(0);
 }
