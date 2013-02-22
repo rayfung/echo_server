@@ -71,7 +71,7 @@ void print_address(struct sockaddr *addr, socklen_t len)
     char ip[NI_MAXHOST], port[NI_MAXSERV];
 
     n = getnameinfo(addr, len, ip, sizeof(ip), port, sizeof(port),
-            NI_DGRAM | NI_NUMERICHOST | NI_NUMERICSERV);
+            NI_NUMERICHOST | NI_NUMERICSERV);
     if(n != 0)
     {
         fprintf(stderr, "getnameinfo: %s\n", gai_strerror(n));
