@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <sys/select.h>
 #include <netdb.h>
 
 #define BUFFER_SIZE 256
@@ -27,6 +28,55 @@ void setup_sigaction(void)
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+}
+
+int tcp_listen(const char *host, const char *serv, socklen_t *len)
+{
+    struct addrinfo *res, *saved, hints;
+    int n, listenfd;
+    const int on = 1;
+
+    bzero(&hints, sizeof(hints));
+    hints.ai_flags = AI_PASSIVE;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    n = getaddrinfo(host, serv, &hints, &res);
+    if(n != 0)
+    {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(n));
+        return -1;
+    }
+    saved = res;
+    while(res)
+    {
+        listenfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if(listenfd >= 0)
+        {
+            if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == -1)
+                perror("setsockopt");
+            if(bind(listenfd, res->ai_addr, res->ai_addrlen) == 0)
+            {
+                if(listen(listenfd, 128) == 0)
+                    break;
+            }
+            close(listenfd);
+        }
+        res = res->ai_next;
+    }
+    if(res == NULL)
+    {
+        perror("tcp_listen");
+        freeaddrinfo(saved);
+        return -1;
+    }
+    else
+    {
+        if(len)
+            *len = res->ai_addrlen;
+        freeaddrinfo(saved);
+        return listenfd;
+    }
 }
 
 int udp_server(const char *host, const char *serv)
@@ -77,14 +127,23 @@ void print_address(struct sockaddr *addr, socklen_t len)
         fprintf(stderr, "getnameinfo: %s\n", gai_strerror(n));
         return;
     }
-    printf("===== [%s]:%s =====\n", ip, port);
+    printf("Client [%s]:%s\n", ip, port);
+}
+
+int max(int fd1, int fd2)
+{
+    return (fd1 > fd2 ? fd1 : fd2);
 }
 
 int main(int argc, char *argv[])
 {
-    int sockfd;
+    int tcpfd, udpfd;
     ssize_t count;
     char buffer[BUFFER_SIZE];
+    socklen_t len;
+    fd_set rset;
+    fd_set allset;
+    int maxfd;
     char *host, *serv;
 
     host = "::";
@@ -98,37 +157,90 @@ int main(int argc, char *argv[])
         case 1:
             break;
         default:
-            fprintf(stderr, "usage: %s [<host> [<service>]]\n", argv[0]);
-            return 1;
+            fprintf(stderr, "usage: %s <host_name> <service_name>\n", argv[0]);
+            exit(1);
     }
 
     setup_sigaction();
-    sockfd = udp_server(host, serv);
-    if(sockfd < 0)
+
+    tcpfd = tcp_listen(host, serv, NULL);
+    if(tcpfd < 0)
         exit(1);
+
+    udpfd = udp_server(host, serv);
+    if(udpfd < 0)
+        exit(1);
+
+    FD_ZERO(&allset);
+    FD_SET(tcpfd, &allset);
+    FD_SET(udpfd, &allset);
+    maxfd = max(tcpfd, udpfd);
 
     while(1)
     {
+        int n, i;
         struct sockaddr_storage addr;
-        socklen_t len;
 
-        len = sizeof(addr);
-        count = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&addr, &len);
-        if(count < 0)
+        rset = allset;
+        n = select(maxfd + 1, &rset, NULL, NULL, NULL);
+        if(n <= 0)
+            continue;
+
+        if(FD_ISSET(udpfd, &rset))
         {
-            perror("recvfrom");
-            exit(1);
+            FD_CLR(udpfd, &rset);
+            --n;
+            len = sizeof(addr);
+            count = recvfrom(udpfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&addr, &len);
+            if(count < 0)
+                perror("recvfrom");
+            else if(count == 0)
+                printf("[warning] received nothing.\n");
+            else
+            {
+                printf("[log] receive %d byte(s).\n", (int)count);
+                count = sendto(udpfd, buffer, count, 0, (struct sockaddr *)&addr, len);
+                printf("[log] send %d byte(s).\n", (int)count);
+            }
+            printf("\n");
         }
-        else if(count == 0)
-            printf("[warning] received nothing.\n");
-        else
+        if(FD_ISSET(tcpfd, &rset))
         {
-            print_address((struct sockaddr *)&addr, len);
-            printf("[log] receive %d byte(s).\n", (int)count);
-            count = sendto(sockfd, buffer, count, 0, (struct sockaddr *)&addr, len);
-            printf("[log] send %d byte(s).\n", (int)count);
+            int connfd;
+
+            FD_CLR(tcpfd, &rset);
+            --n;
+            len = sizeof(addr);
+            connfd = accept(tcpfd, (struct sockaddr *)&addr, &len);
+            if(connfd < 0)
+                perror("accept");
+            else
+            {
+                FD_SET(connfd, &allset);
+                maxfd = max(maxfd, connfd);
+                printf("TCP client #%d accpeted.\n", connfd);
+            }
         }
-        printf("\n");
+        for(i = 0; i <= maxfd && n > 0; ++i)
+        {
+            if(FD_ISSET(i, &rset))
+            {
+                --n;
+                count = read(i, buffer, BUFFER_SIZE);
+                if(count <= 0)
+                {
+                    close(i);
+                    FD_CLR(i, &allset);
+                    printf("#%d closed.\n", i);
+                }
+                else
+                {
+                    printf("read %d byte(s)\n", (int)count);
+                    count = write(i, buffer, count);
+                    printf("write %d byte(s)\n\n", (int)count);
+                }
+            }
+        }
     }
     exit(0);
 }
