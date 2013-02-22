@@ -37,13 +37,13 @@ int udp_connect(const char *host, const char *serv)
         }
         res = res->ai_next;
     }
-    freeaddrinfo(saved);
     if(res == NULL)
     {
         perror("udp_connect");
-        return -1;
+        sockfd = -1;
     }
-    else return sockfd;
+    freeaddrinfo(saved);
+    return sockfd;
 }
 
 void input_echo(int sockfd)
