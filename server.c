@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <netdb.h>
 
 #define BUFFER_SIZE 256
 
@@ -28,42 +29,89 @@ void setup_sigaction(void)
     sigaction(SIGTERM, &sa, NULL);
 }
 
-int init_socket()
+int udp_server(const char *host, const char *serv)
 {
-    struct sockaddr_in addr;
-    int sockfd;
+    int n, sockfd;
+    struct addrinfo hints, *res, *saved;
 
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if(sockfd == -1)
+    bzero(&hints, sizeof(hints));
+    hints.ai_flags = AI_PASSIVE;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    n = getaddrinfo(host, serv, &hints, &res);
+    if(n != 0)
     {
-        perror("socket");
-        exit(1);
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(n));
+        return -1;
     }
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(8080);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    if(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == -1)
+    saved = res;
+    while(res)
     {
-        perror("bind");
-        exit(1);
+        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if(sockfd >= 0)
+        {
+            if(bind(sockfd, res->ai_addr, res->ai_addrlen) == 0)
+                break;
+        }
+        res = res->ai_next;
     }
+    if(res == NULL)
+    {
+        perror("udp_server");
+        sockfd = -1;
+    }
+    freeaddrinfo(saved);
     return sockfd;
+}
+
+void print_address(struct sockaddr *addr, socklen_t len)
+{
+    int n;
+    char ip[NI_MAXHOST], port[NI_MAXSERV];
+
+    n = getnameinfo(addr, len, ip, sizeof(ip), port, sizeof(port),
+            NI_DGRAM | NI_NUMERICHOST | NI_NUMERICSERV);
+    if(n != 0)
+    {
+        fprintf(stderr, "getnameinfo: %s\n", gai_strerror(n));
+        return;
+    }
+    printf("===== [%s]:%s =====\n", ip, port);
 }
 
 int main(int argc, char *argv[])
 {
-    struct sockaddr_in addr;
     int sockfd;
     ssize_t count;
     char buffer[BUFFER_SIZE];
-    socklen_t len;
+    char *host, *serv;
+
+    host = "::";
+    serv = "webcache";
+    switch(argc)
+    {
+        case 3:
+            serv = argv[2];
+        case 2:
+            host = argv[1];
+        case 1:
+            break;
+        default:
+            fprintf(stderr, "usage: %s [<host> [<service>]]\n", argv[0]);
+            return 1;
+    }
 
     setup_sigaction();
-    sockfd = init_socket();
+    sockfd = udp_server(host, serv);
+    if(sockfd < 0)
+        exit(1);
 
     while(1)
     {
+        struct sockaddr_storage addr;
+        socklen_t len;
+
         len = sizeof(addr);
         count = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&addr, &len);
         if(count < 0)
@@ -75,10 +123,8 @@ int main(int argc, char *argv[])
             printf("[warning] received nothing.\n");
         else
         {
-            printf("===== %s:%d =====\n", inet_ntoa(addr.sin_addr),
-                    (int)ntohs(addr.sin_port));
+            print_address((struct sockaddr *)&addr, len);
             printf("[log] receive %d byte(s).\n", (int)count);
-            len = sizeof(addr);
             count = sendto(sockfd, buffer, count, 0, (struct sockaddr *)&addr, len);
             printf("[log] send %d byte(s).\n", (int)count);
         }
