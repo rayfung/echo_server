@@ -147,7 +147,7 @@ int main(int argc, char *argv[])
     char *host, *serv;
 
     host = "::";
-    serv = "webcache";
+    serv = "8080";
     switch(argc)
     {
         case 3:
