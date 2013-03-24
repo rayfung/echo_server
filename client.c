@@ -11,6 +11,11 @@
 
 #define BUFFER_SIZE 256
 
+int tcp_connect(const char *host, const char *serv)
+{
+	return -1;
+}
+
 int udp_connect(const char *host, const char *serv)
 {
     struct addrinfo hints, *res, *saved;
@@ -95,7 +100,11 @@ int main(int argc, char *argv[])
             return 1;
     }
 
+#ifdef USE_UDP
     sockfd = udp_connect(host, serv);
+#else
+    sockfd = tcp_connect(host, serv);
+#endif
     if(sockfd < 0)
         exit(1);
     input_echo(sockfd);

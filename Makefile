@@ -1,7 +1,9 @@
-all: server client
+all: server tcp_client udp_client
 server: server.c
 	gcc -O2 -o $@ $^
-client: client.c
+tcp_client: client.c
 	gcc -O2 -o $@ $^
+udp_client: client.c
+	gcc -DUSE_UDP -O2 -o $@ $^
 clean:
-	rm -f server client
+	rm -f server tcp_client udp_client
