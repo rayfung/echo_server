@@ -213,7 +213,10 @@ int main(int argc, char *argv[])
             len = sizeof(addr);
             connfd = accept(tcpfd, (struct sockaddr *)&addr, &len);
             if(connfd < 0)
-                perror("accept");
+			{
+				if(errno != EINTR)
+					perror("accept");
+			}
             else
             {
                 FD_SET(connfd, &allset);
