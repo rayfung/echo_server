@@ -70,7 +70,7 @@ void input_echo(int sockfd)
         else
         {
             buf[count] = '\0';
-            printf("%s");
+            printf("%s", buf);
         }
     }
 }
