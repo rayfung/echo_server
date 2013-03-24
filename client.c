@@ -13,7 +13,37 @@
 
 int tcp_connect(const char *host, const char *serv)
 {
-	return -1;
+    struct addrinfo hints, *res, *saved;
+    int n, sockfd;
+
+    bzero(&hints, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    n = getaddrinfo(host, serv, &hints, &res);
+    if(n != 0)
+    {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(n));
+        return -1;
+    }
+    saved = res;
+    while(res)
+    {
+        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if(sockfd >= 0)
+        {
+            if(connect(sockfd, res->ai_addr, res->ai_addrlen) == 0)
+                break;
+        }
+        res = res->ai_next;
+    }
+    if(res == NULL)
+    {
+        perror("tcp_connect");
+        sockfd = -1;
+    }
+    freeaddrinfo(saved);
+    return sockfd;
 }
 
 int udp_connect(const char *host, const char *serv)
