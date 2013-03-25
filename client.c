@@ -11,15 +11,15 @@
 
 #define BUFFER_SIZE 256
 
-int tcp_connect(const char *host, const char *serv)
+int ip_connect(int type, int protocol, const char *host, const char *serv)
 {
     struct addrinfo hints, *res, *saved;
     int n, sockfd;
 
     bzero(&hints, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_socktype = type;
+    hints.ai_protocol = protocol;
     n = getaddrinfo(host, serv, &hints, &res);
     if(n != 0)
     {
@@ -39,42 +39,7 @@ int tcp_connect(const char *host, const char *serv)
     }
     if(res == NULL)
     {
-        perror("tcp_connect");
-        sockfd = -1;
-    }
-    freeaddrinfo(saved);
-    return sockfd;
-}
-
-int udp_connect(const char *host, const char *serv)
-{
-    struct addrinfo hints, *res, *saved;
-    int n, sockfd;
-
-    bzero(&hints, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-    n = getaddrinfo(host, serv, &hints, &res);
-    if(n != 0)
-    {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(n));
-        return -1;
-    }
-    saved = res;
-    while(res)
-    {
-        sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if(sockfd >= 0)
-        {
-            if(connect(sockfd, res->ai_addr, res->ai_addrlen) == 0)
-                break;
-        }
-        res = res->ai_next;
-    }
-    if(res == NULL)
-    {
-        perror("udp_connect");
+        perror("ip_connect");
         sockfd = -1;
     }
     freeaddrinfo(saved);
@@ -131,9 +96,9 @@ int main(int argc, char *argv[])
     }
 
 #ifdef USE_UDP
-    sockfd = udp_connect(host, serv);
+    sockfd = ip_connect(SOCK_DGRAM, IPPROTO_UDP, host, serv);
 #else
-    sockfd = tcp_connect(host, serv);
+    sockfd = ip_connect(SOCK_STREAM, IPPROTO_TCP, host, serv);
 #endif
     if(sockfd < 0)
         exit(1);
