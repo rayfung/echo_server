@@ -19,6 +19,7 @@ void handler(int num)
     exit(0);
 }
 
+/* setup signal handler for SIGINT and SIGTERM */
 void setup_sigaction(void)
 {
     struct sigaction sa;
@@ -30,6 +31,16 @@ void setup_sigaction(void)
     sigaction(SIGTERM, &sa, NULL);
 }
 
+/**
+ * create a new socket and bind to host:serv, finally listen()
+ * this function also set the SO_REUSEADDR socket option
+ *
+ * len: the length of address is returned
+ * via this parameter after the call (if len is not NULL)
+ *
+ * On success, a file descriptor for the new socket is returned
+ * On error, -1 is returned
+ */
 int tcp_listen(const char *host, const char *serv, socklen_t *len)
 {
     struct addrinfo *res, *saved, hints;
@@ -79,6 +90,7 @@ int tcp_listen(const char *host, const char *serv, socklen_t *len)
     }
 }
 
+/* this function is similar to tcp_listen() */
 int udp_server(const char *host, const char *serv)
 {
     int n, sockfd;
@@ -186,6 +198,7 @@ int main(int argc, char *argv[])
         if(n <= 0)
             continue;
 
+		/* someone throws a box here */
         if(FD_ISSET(udpfd, &rset))
         {
             FD_CLR(udpfd, &rset);
@@ -204,6 +217,8 @@ int main(int argc, char *argv[])
             }
             printf("\n");
         }
+
+		/* someone is connected to tcpfd, we should welcome that guy */
         if(FD_ISSET(tcpfd, &rset))
         {
             int connfd;
@@ -224,13 +239,15 @@ int main(int argc, char *argv[])
                 printf("TCP client #%d accpeted.\n", connfd);
             }
         }
+
+		/* I am so boring, maybe I should find someone to have a chat */
         for(i = 0; i <= maxfd && n > 0; ++i)
         {
             if(FD_ISSET(i, &rset))
             {
                 --n;
                 count = read(i, buffer, BUFFER_SIZE);
-                if(count <= 0)
+                if(count <= 0) /* You are leaving? */
                 {
                     close(i);
                     FD_CLR(i, &allset);
