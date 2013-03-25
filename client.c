@@ -11,6 +11,19 @@
 
 #define BUFFER_SIZE 256
 
+/**
+ * create a socket
+ * and connect to host:serv (TCP)
+ * or set the default destination host:serv (UDP)
+ *
+ * type: SOCK_STREAM or SOCK_DGRAM
+ * protocol: IPPROTO_TCP or IPPROTO_UDP
+ * host: host name of remote host
+ * serv: service name
+ *
+ * On success, a file descriptor for the new socket is returned
+ * On error, -1 is returned
+ */
 int ip_connect(int type, int protocol, const char *host, const char *serv)
 {
     struct addrinfo hints, *res, *saved;
