@@ -9,10 +9,13 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <errno.h>
-#include <sys/select.h>
 #include <netdb.h>
+#include <poll.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #define BUFFER_SIZE 256
+#define MAX_NFDS 800
 
 void handler(int num)
 {
@@ -142,9 +145,10 @@ void print_address(struct sockaddr *addr, socklen_t len)
     printf("Client [%s]:%s\n", ip, port);
 }
 
-int max(int fd1, int fd2)
+void set_nonblocking(int sockfd)
 {
-    return (fd1 > fd2 ? fd1 : fd2);
+    int flags = fcntl(sockfd, F_GETFL);
+    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
 }
 
 int main(int argc, char *argv[])
@@ -153,10 +157,11 @@ int main(int argc, char *argv[])
     ssize_t count;
     char buffer[BUFFER_SIZE];
     socklen_t len;
-    fd_set rset;
-    fd_set allset;
     int maxfd;
     char *host, *serv;
+    struct pollfd fds[MAX_NFDS];
+    int max_nfds = MAX_NFDS;
+    int nfds;
 
     host = "::";
     serv = "8080";
@@ -183,25 +188,26 @@ int main(int argc, char *argv[])
     if(udpfd < 0)
         exit(1);
 
-    FD_ZERO(&allset);
-    FD_SET(tcpfd, &allset);
-    FD_SET(udpfd, &allset);
-    maxfd = max(tcpfd, udpfd);
+    set_nonblocking(tcpfd);
+    set_nonblocking(udpfd);
+
+    fds[0].fd = tcpfd;
+    fds[0].events = POLLIN;
+    fds[1].fd = udpfd;
+    fds[1].events = POLLIN;
+    nfds = 2;
 
     while(1)
     {
         int n, i;
         struct sockaddr_storage addr;
 
-        rset = allset;
-        n = select(maxfd + 1, &rset, NULL, NULL, NULL);
-        if(n <= 0)
-            continue;
+        n = poll(fds, nfds, -1);
+        if(n < 0)
+            exit(1);
 
-		/* someone throws a box here */
-        if(FD_ISSET(udpfd, &rset))
+        if(fds[1].revents & POLLIN)
         {
-            FD_CLR(udpfd, &rset);
             --n;
             len = sizeof(addr);
             count = recvfrom(udpfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&addr, &len);
@@ -218,45 +224,56 @@ int main(int argc, char *argv[])
             printf("\n");
         }
 
-		/* someone is connected to tcpfd, we should welcome that guy */
-        if(FD_ISSET(tcpfd, &rset))
+        if(fds[0].revents & POLLIN)
         {
             int connfd;
 
-            FD_CLR(tcpfd, &rset);
             --n;
-            len = sizeof(addr);
-            connfd = accept(tcpfd, (struct sockaddr *)&addr, &len);
-            if(connfd < 0)
-			{
-				if(errno != EINTR)
-					perror("accept");
-			}
-            else
+            while(1)
             {
-                FD_SET(connfd, &allset);
-                maxfd = max(maxfd, connfd);
-                printf("TCP client #%d accpeted.\n", connfd);
+                len = sizeof(addr);
+                connfd = accept(tcpfd, (struct sockaddr *)&addr, &len);
+                if(connfd < 0)
+                {
+                    if(errno == EAGAIN || errno == EWOULDBLOCK)
+                        break;
+                    if(errno != EINTR)
+                        perror("accept");
+                }
+                else
+                {
+                    if(nfds >= max_nfds)
+                    {
+                        close(connfd);
+                        fprintf(stderr, "too many connections\n");
+                        break;
+                    }
+                    fds[nfds].fd = connfd;
+                    fds[nfds].events = POLLIN;
+                    ++nfds;
+                    printf("TCP client #%d accpeted.\n", connfd);
+                }
             }
         }
 
-		/* I am so boring, maybe I should find someone to have a chat */
-        for(i = 0; i <= maxfd && n > 0; ++i)
+        for(i = 2; i < max_nfds && n > 0; ++i)
         {
-            if(FD_ISSET(i, &rset))
+            if(fds[i].revents & (POLLIN | POLLERR))
             {
                 --n;
-                count = read(i, buffer, BUFFER_SIZE);
-                if(count <= 0) /* You are leaving? */
+                count = read(fds[i].fd, buffer, BUFFER_SIZE);
+                if(count <= 0)
                 {
-                    close(i);
-                    FD_CLR(i, &allset);
-                    printf("#%d closed.\n", i);
+                    int j;
+
+                    close(fds[i].fd);
+                    printf("#%d closed.\n", fds[i].fd);
+                    fds[i].fd = -1;
                 }
                 else
                 {
                     printf("read %d byte(s)\n", (int)count);
-                    count = write(i, buffer, count);
+                    count = write(fds[i].fd, buffer, count);
                     printf("write %d byte(s)\n\n", (int)count);
                 }
             }
