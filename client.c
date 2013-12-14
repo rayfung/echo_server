@@ -79,7 +79,7 @@ void input_echo(int sockfd)
             exit(1);
         }
         else if(count == 0)
-            printf("[warning] 0 byte received.\n");
+            return;
         else
         {
             buf[count] = '\0';
