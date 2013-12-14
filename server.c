@@ -151,6 +151,30 @@ void set_nonblocking(int sockfd)
     fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
 }
 
+nfds_t defrag_fds(struct pollfd *fds, nfds_t nfds)
+{
+    nfds_t i, j;
+
+    for(i = 0; i < nfds; ++i)
+    {
+        if(fds[i].fd == -1)
+            break;
+    }
+    if(i == nfds)
+        return nfds;
+
+    for(j = i + 1; j < nfds; ++j)
+    {
+        if(fds[j].fd != -1)
+        {
+            fds[i] = fds[j];
+            fds[j].fd = -1;
+            ++i;
+        }
+    }
+    return i;
+}
+
 int main(int argc, char *argv[])
 {
     int tcpfd, udpfd;
@@ -199,7 +223,7 @@ int main(int argc, char *argv[])
 
     while(1)
     {
-        int n, i;
+        int n, i, j;
         struct sockaddr_storage addr;
 
         n = poll(fds, nfds, -1);
@@ -264,8 +288,6 @@ int main(int argc, char *argv[])
                 count = read(fds[i].fd, buffer, BUFFER_SIZE);
                 if(count <= 0)
                 {
-                    int j;
-
                     close(fds[i].fd);
                     printf("#%d closed.\n", fds[i].fd);
                     fds[i].fd = -1;
@@ -278,6 +300,8 @@ int main(int argc, char *argv[])
                 }
             }
         }
+
+        nfds = defrag_fds(fds, nfds);
     }
     exit(0);
 }
